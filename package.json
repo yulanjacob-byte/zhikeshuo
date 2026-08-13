@@ -1,0 +1,24 @@
+{
+  "name": "zhikeshuo-clone",
+  "version": "1.0.0",
+  "description": "理财经理专属话术助手：盘面解读、五维评分、今日话术、对客话术生成",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/index.js",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "https-proxy-agent": "^9.1.0",
+    "iconv-lite": "^0.7.3",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.1"
+  }
+}
