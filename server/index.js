@@ -341,6 +341,48 @@ function mockGenerateAI(type) {
   return { text: 'AI 生成内容（Mock）' }
 }
 
+// ==================== 行情数据缓存 ====================
+
+let _marketCache = null
+let _marketCacheTime = 0
+const MARKET_CACHE_TTL = 30000 // 30秒缓存
+
+/** 带缓存的行情数据获取 */
+async function getCachedMarketData() {
+  const now = Date.now()
+  if (_marketCache && (now - _marketCacheTime) < MARKET_CACHE_TTL) {
+    console.log('[行情] 使用缓存数据（距上次刷新 %dms）', now - _marketCacheTime)
+    return _marketCache
+  }
+
+  console.log('[行情] 缓存过期，重新拉取实时数据...')
+  let marketData = null
+  try {
+    marketData = await fetchMarketData()
+    if (marketData.indices.length === 0) {
+      console.warn('[行情] 返回空数据，降级到 mock')
+      marketData = null
+    }
+  } catch (e) {
+    console.warn('[行情] 请求失败，降级到 mock:', e.message)
+    marketData = null
+  }
+
+  if (!marketData) {
+    marketData = {
+      indices: mockIndices,
+      boardsUp: mockBoardsUp,
+      boardsDown: mockBoardsDown,
+      breadth: mockBreadth,
+      kline: genAllKlines()
+    }
+  }
+
+  _marketCache = marketData
+  _marketCacheTime = now
+  return marketData
+}
+
 // ==================== 路由处理 ====================
 
 /** 市场简报 */
@@ -352,15 +394,7 @@ async function handleMarketBrief(req) {
   if (req.method === 'POST') {
     const body = await parseBody(req)
     if (body.aiType === 'emotion') {
-      // 获取行情数据供 AI 分析
-      let marketData = null
-      try {
-        marketData = await fetchMarketData()
-        if (!marketData.indices.length) marketData = null
-      } catch {}
-      if (!marketData) {
-        marketData = { indices: mockIndices, boardsUp: mockBoardsUp, boardsDown: mockBoardsDown, breadth: mockBreadth }
-      }
+      const marketData = await getCachedMarketData()
       const result = await generateAI('emotion', { marketData })
       return {
         ok: true,
@@ -371,29 +405,8 @@ async function handleMarketBrief(req) {
     }
   }
 
-  // 优先获取东方财富实时数据，失败则降级到 mock
-  let marketData = null
-  try {
-    marketData = await fetchMarketData()
-    if (marketData.indices.length === 0) {
-      console.warn('[行情] 东方财富返回空数据，降级到 mock')
-      marketData = null
-    }
-  } catch (e) {
-    console.warn('[行情] 东方财富请求失败，降级到 mock:', e.message)
-    marketData = null
-  }
-
-  // 降级数据
-  if (!marketData) {
-    marketData = {
-      indices: mockIndices,
-      boardsUp: mockBoardsUp,
-      boardsDown: mockBoardsDown,
-      breadth: mockBreadth,
-      kline: genAllKlines()
-    }
-  }
+  // 获取行情数据（带缓存）
+  const marketData = await getCachedMarketData()
 
   const baseData = {
     ok: true,
@@ -420,16 +433,7 @@ async function handleMarketBrief(req) {
 
 /** 今日话术 */
 async function handleDailyScripts() {
-  // 获取行情数据供 AI 生成话术
-  let marketData = null
-  try {
-    marketData = await fetchMarketData()
-    if (!marketData.indices.length) marketData = null
-  } catch {}
-  if (!marketData) {
-    marketData = { indices: mockIndices, boardsUp: mockBoardsUp, boardsDown: mockBoardsDown, breadth: mockBreadth }
-  }
-
+  const marketData = await getCachedMarketData()
   const result = await generateAI('dailyScripts', { marketData })
   return {
     ok: true,
@@ -519,16 +523,7 @@ async function handleScore(req) {
 
 /** 宏观简报 */
 async function handleMacroBrief() {
-  // 获取行情数据供 AI 分析
-  let marketData = null
-  try {
-    marketData = await fetchMarketData()
-    if (!marketData.indices.length) marketData = null
-  } catch {}
-  if (!marketData) {
-    marketData = { indices: mockIndices, boardsUp: mockBoardsUp, boardsDown: mockBoardsDown, breadth: mockBreadth }
-  }
-
+  const marketData = await getCachedMarketData()
   const result = await generateAI('macroBrief', { marketData })
   return {
     ok: true,
