@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
-  { path: '/', redirect: '/daily' },
+  { path: '/', redirect: '/market' },
   {
     path: '/daily',
     name: 'daily',
