@@ -341,6 +341,21 @@ function mockGenerateAI(type) {
   return { text: 'AI 生成内容（Mock）' }
 }
 
+// ==================== Markdown 清洗 ====================
+
+/** 去除 AI 返回内容中的 Markdown 格式符号 */
+function stripMarkdown(text) {
+  if (!text || typeof text !== 'string') return text
+  return text
+    .replace(/^#{1,6}\s+/gm, '')      // 去除行首 # 标题
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // 去除 **加粗**
+    .replace(/\*(.+?)\*/g, '$1')       // 去除 *斜体*
+    .replace(/`([^`]+)`/g, '$1')       // 去除 `代码`
+    .replace(/^>\s+/gm, '')            // 去除 > 引用
+    .replace(/^[-*]\s+/gm, '')         // 去除列表符号
+    .replace(/^\d+\.\s+/gm, '')        // 去除有序列表符号（可选）
+}
+
 // ==================== 行情数据缓存 ====================
 
 let _marketCache = null
@@ -398,8 +413,8 @@ async function handleMarketBrief(req) {
       const result = await generateAI('emotion', { marketData })
       return {
         ok: true,
-        emotion: result.emotion,
-        strategy: result.strategy,
+        emotion: stripMarkdown(result.emotion),
+        strategy: stripMarkdown(result.strategy),
         promptVersion: 'hunyuan-v1'
       }
     }
@@ -423,9 +438,15 @@ async function handleMarketBrief(req) {
 
   // 带 AI 的市场简报（盘面解读）
   const ai = await generateAI('marketBrief', { marketData })
+  const aiData = ai.ai || {}
   return {
     ...baseData,
-    ai: ai.ai,
+    ai: {
+      ...aiData,
+      summary: stripMarkdown(aiData.summary),
+      topics: (aiData.topics || []).map(stripMarkdown),
+      caution: stripMarkdown(aiData.caution)
+    },
     time: new Date().toISOString(),
     promptVersion: 'hunyuan-v1'
   }
@@ -435,11 +456,17 @@ async function handleMarketBrief(req) {
 async function handleDailyScripts() {
   const marketData = await getCachedMarketData()
   const result = await generateAI('dailyScripts', { marketData })
+  const scripts = (result.scripts || []).map(s => ({
+    ...s,
+    body: stripMarkdown(s.body),
+    title: stripMarkdown(s.title),
+    scene: stripMarkdown(s.scene)
+  }))
   return {
     ok: true,
     ai: {
-      scripts: result.scripts,
-      moments: result.moments
+      scripts,
+      moments: stripMarkdown(result.moments)
     },
     promptVersion: 'hunyuan-v1'
   }
@@ -483,7 +510,7 @@ async function handleGenerateScript(req) {
 
   return {
     ok: true,
-    script: typeof result === 'string' ? result : (result.body || result.script || ''),
+    script: stripMarkdown(typeof result === 'string' ? result : (result.body || result.script || '')),
     sources,
     matchInfo: tagNameList ? `画像标签：${tagNameList}（${(body.tags || []).length}个）` : '',
     promptVersion: 'hunyuan-v1'
@@ -527,7 +554,7 @@ async function handleMacroBrief() {
   const result = await generateAI('macroBrief', { marketData })
   return {
     ok: true,
-    article: result.article,
+    article: stripMarkdown(result.article),
     promptVersion: 'hunyuan-v1'
   }
 }

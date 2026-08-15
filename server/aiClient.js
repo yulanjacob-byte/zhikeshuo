@@ -226,8 +226,9 @@ export function buildMacroBriefPrompt(marketData) {
 - 语言专业但不过于学术
 - 必须包含风险提示
 - 不要推荐具体产品
+- 不要使用任何Markdown格式符号（如#、##、###、**、*、`等），用纯文本和数字编号组织内容
 
-请直接返回文章全文（纯文本，不要JSON）。`
+请直接返回文章全文（纯文本，不要JSON，不要Markdown）。`
       },
       {
         role: 'user',
@@ -360,8 +361,9 @@ export function buildGenerateScriptPrompt(params) {
 6. 不出现具体基金名称、代码、经理名
 7. 长度200-400字
 8. 语气符合沟通渠道特点（微信偏简洁、电话偏亲切、面谈偏深入）
+9. 不要使用任何Markdown格式符号（如#、**、*、`等），用纯文本
 
-请直接返回话术全文（纯文本，不要JSON，不要标题前缀）。`
+请直接返回话术全文（纯文本，不要JSON，不要标题前缀，不要Markdown）。`
       },
       {
         role: 'user',
