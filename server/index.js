@@ -398,6 +398,41 @@ async function getCachedMarketData() {
   return marketData
 }
 
+// ==================== AI 结果缓存 ====================
+
+const _aiCache = new Map() // key: type + ctxHash → { data, time }
+const AI_CACHE_TTL = 300000 // 5分钟缓存
+
+/** 带缓存的 AI 生成（5分钟内多人请求返回同一份结果） */
+async function getCachedAI(type, ctx = {}) {
+  // 生成缓存 key：type + 关键上下文的哈希
+  const ctxKey = JSON.stringify(ctx || {})
+  const cacheKey = `${type}:${ctxKey}`
+  const cached = _aiCache.get(cacheKey)
+
+  if (cached && (Date.now() - cached.time) < AI_CACHE_TTL) {
+    console.log(`[AI缓存] 命中: ${type}（距上次生成 ${Math.round((Date.now() - cached.time) / 1000)}秒前）`)
+    return cached.data
+  }
+
+  // 缓存未命中，调用 AI 生成
+  console.log(`[AI缓存] 未命中: ${type}，调用 DeepSeek 生成...`)
+  const data = await generateAI(type, ctx)
+  _aiCache.set(cacheKey, { data, time: Date.now() })
+  return data
+}
+
+/** 清除指定类型的 AI 缓存（可选：行情刷新时清除） */
+function clearAICache(type) {
+  if (type) {
+    for (const key of _aiCache.keys()) {
+      if (key.startsWith(type + ':')) _aiCache.delete(key)
+    }
+  } else {
+    _aiCache.clear()
+  }
+}
+
 // ==================== 路由处理 ====================
 
 /** 市场简报 */
@@ -410,7 +445,7 @@ async function handleMarketBrief(req) {
     const body = await parseBody(req)
     if (body.aiType === 'emotion') {
       const marketData = await getCachedMarketData()
-      const result = await generateAI('emotion', { marketData })
+      const result = await getCachedAI('emotion', { marketData })
       return {
         ok: true,
         emotion: stripMarkdown(result.emotion),
@@ -437,7 +472,7 @@ async function handleMarketBrief(req) {
   }
 
   // 带 AI 的市场简报（盘面解读）
-  const ai = await generateAI('marketBrief', { marketData })
+  const ai = await getCachedAI('marketBrief', { marketData })
   const aiData = ai.ai || {}
   return {
     ...baseData,
@@ -455,7 +490,7 @@ async function handleMarketBrief(req) {
 /** 今日话术 */
 async function handleDailyScripts() {
   const marketData = await getCachedMarketData()
-  const result = await generateAI('dailyScripts', { marketData })
+  const result = await getCachedAI('dailyScripts', { marketData })
   const scripts = (result.scripts || []).map(s => ({
     ...s,
     body: stripMarkdown(s.body),
@@ -497,7 +532,7 @@ async function handleGenerateScript(req) {
   const searchQuery = buildSearchQuery(tagNames, body.context || '', body.stage || '')
   const sources = searchHandbook(searchQuery, { topK: 3, minScore: 2 })
 
-  const result = await generateAI('generateScript', {
+  const result = await getCachedAI('generateScript', {
     channel: body.channel || 'wechat',
     stage: body.stage || 'first',
     tags: tagNames,
@@ -551,7 +586,7 @@ async function handleScore(req) {
 /** 宏观简报 */
 async function handleMacroBrief() {
   const marketData = await getCachedMarketData()
-  const result = await generateAI('macroBrief', { marketData })
+  const result = await getCachedAI('macroBrief', { marketData })
   return {
     ok: true,
     article: stripMarkdown(result.article),
