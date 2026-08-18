@@ -135,7 +135,7 @@ export function indexDetail(code, window) {
 
 /** 获取全部指数行情（国内+海外） */
 export function indexAll() {
-  return request({ url: '/indexAll', timeout: 20000 })
+  return request({ url: '/indexAll', timeout: 30000 })
 }
 
 /** 提交用户反馈 */

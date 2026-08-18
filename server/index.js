@@ -594,8 +594,14 @@ async function handleMacroBrief() {
   }
 }
 
-/** 指数行情页（国内 8 + 海外 5） */
+/** 指数行情页（国内 8 + 海外 5）—— 30秒缓存 */
+let _indexAllCache = null
+let _indexAllCacheTime = 0
 async function handleIndexAll() {
+  // 30秒缓存，避免频繁请求腾讯API导致超时
+  if (_indexAllCache && (Date.now() - _indexAllCacheTime) < 30000) {
+    return _indexAllCache
+  }
   const data = await fetchAllIndices()
   if (!data) {
     return {
@@ -606,7 +612,9 @@ async function handleIndexAll() {
       kline: {}
     }
   }
-  return { ok: true, ...data }
+  _indexAllCache = { ok: true, ...data }
+  _indexAllCacheTime = Date.now()
+  return _indexAllCache
 }
 
 /** 指数详情 */
