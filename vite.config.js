@@ -7,6 +7,11 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        runtimeCaching: []
+      },
       manifest: {
         name: '知市达客 · 理财经理话术助手',
         short_name: '知市达客',
