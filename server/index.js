@@ -644,8 +644,8 @@ async function handleIndexDetail(req) {
     kline = await fetchKlineByRange(code, window)
   } catch {}
 
-  if (!kline || kline.length === 0) {
-    // 降级到 mock K线
+  if (!kline || kline.length < 5) {
+    // 数据源异常（行数过少算不出指标），降级到 mock K线
     kline = genMockKline(idx?.price || 3940, idx?.changePct || 1.02).map(p => ({
       ...p,
       open: p.close * (1 + (Math.random() - 0.5) * 0.01),

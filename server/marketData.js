@@ -286,6 +286,16 @@ export async function fetchAllKlines(indices) {
  * @param {string} range - 时间范围：1w/1m/3m/6m/1y
  * @returns {Promise<Array>} K线数据 [{date, open, close, high, low, volume}]
  */
+// 美股指数 东方财富 secid 映射（腾讯K线对美股指数只返回1行，东财才有多日历史）
+const EM_SECID_MAP = {
+  'usDJI': '100.DJIA',
+  'usIXIC': '100.NDX',
+  'usINX': '100.SPX'
+}
+
+// 腾讯K线支持的指数（港股 + 中证1000；北证50 腾讯只有1行历史，走新浪）
+const TX_KLINE_CODES = ['hkHSI', 'hkHSTECH', 'sh000852']
+
 export async function fetchKlineByRange(code, range = '3m') {
   const rangeMap = {
     '1w': 7,
@@ -296,11 +306,16 @@ export async function fetchKlineByRange(code, range = '3m') {
   }
   const datalen = rangeMap[range] || 90
 
-  // 海外指数（港股/美股）走腾讯K线接口
-  if (!INDEX_NAMES[code] && ALL_INDEX_NAMES[code]) {
+  // 美股指数走东方财富K线接口
+  if (EM_SECID_MAP[code]) {
+    return fetchKlineEastMoney(code, datalen)
+  }
+  // 港股指数/中证1000走腾讯K线接口
+  if (TX_KLINE_CODES.includes(code)) {
     return fetchKlineTencent(code, datalen)
   }
-  if (!INDEX_NAMES[code]) return null
+  // 国内指数（含北证50）走新浪K线接口
+  if (!ALL_INDEX_NAMES[code]) return null
 
   const url = `${SINA_KLINE}?symbol=${code}&scale=240&datalen=${datalen}`
   const json = await httpGetJSON(url)
@@ -314,6 +329,31 @@ export async function fetchKlineByRange(code, range = '3m') {
     low: num(item.low),
     volume: num(item.volume)
   }))
+}
+
+/**
+ * 东方财富K线接口（美股指数）
+ * https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.DJIA&...
+ * 返回 data.klines: ["date,open,close,high,low,volume,amount", ...]
+ */
+export async function fetchKlineEastMoney(code, days = 90) {
+  const secid = EM_SECID_MAP[code]
+  if (!secid) return null
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=0&lmt=${days}&end=20500101`
+  const json = await httpGetJSON(url, { 'Referer': 'https://quote.eastmoney.com/' })
+  if (!json || !json.data || !Array.isArray(json.data.klines)) return null
+
+  return json.data.klines.map(line => {
+    const p = line.split(',')
+    return {
+      date: p[0],
+      open: num(p[1]),
+      close: num(p[2]),
+      high: num(p[3]),
+      low: num(p[4]),
+      volume: num(p[5])
+    }
+  })
 }
 
 /**
