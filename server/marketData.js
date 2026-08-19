@@ -287,8 +287,6 @@ export async function fetchAllKlines(indices) {
  * @returns {Promise<Array>} K线数据 [{date, open, close, high, low, volume}]
  */
 export async function fetchKlineByRange(code, range = '3m') {
-  if (!INDEX_NAMES[code]) return null
-
   const rangeMap = {
     '1w': 7,
     '1m': 30,
@@ -297,6 +295,12 @@ export async function fetchKlineByRange(code, range = '3m') {
     '1y': 250
   }
   const datalen = rangeMap[range] || 90
+
+  // 海外指数（港股/美股）走腾讯K线接口
+  if (!INDEX_NAMES[code] && ALL_INDEX_NAMES[code]) {
+    return fetchKlineTencent(code, datalen)
+  }
+  if (!INDEX_NAMES[code]) return null
 
   const url = `${SINA_KLINE}?symbol=${code}&scale=240&datalen=${datalen}`
   const json = await httpGetJSON(url)
@@ -310,6 +314,55 @@ export async function fetchKlineByRange(code, range = '3m') {
     low: num(item.low),
     volume: num(item.volume)
   }))
+}
+
+/**
+ * 腾讯K线接口（支持港股/美股指数，国内指数同样适用）
+ * https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=hkHSI,day,,,90,qfq
+ * 返回 data[code].qfqday 或 data[code].day：[[date, open, close, high, low, volume], ...]
+ */
+export async function fetchKlineTencent(code, days = 90) {
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${code},day,,,${days},qfq`
+  const json = await httpGetJSON(url, { 'Referer': 'https://gu.qq.com/' })
+  if (!json || !json.data || !json.data[code]) return null
+
+  const node = json.data[code]
+  const rows = node.qfqday || node.day
+  if (!Array.isArray(rows) || rows.length === 0) return null
+
+  return rows.map(r => ({
+    date: r[0],
+    open: num(r[1]),
+    close: num(r[2]),
+    high: num(r[3]),
+    low: num(r[4]),
+    volume: num(r[5])
+  }))
+}
+
+/**
+ * 获取单个指数实时行情（国内/海外均支持，腾讯接口）
+ */
+export async function fetchIndexQuote(code) {
+  if (!ALL_INDEX_NAMES[code]) return null
+  const res = await httpGet(`${TX_BASE}${code}`, { 'Referer': 'https://gu.qq.com/' })
+  if (!res || !res.ok) return null
+  const text = res.buffer.toString('latin1')
+  const match = text.match(new RegExp(`v_${code}="([^"]*)"`))
+  if (!match) return null
+  const parts = match[1].split('~')
+  if (parts.length < 35) return null
+
+  const price = num(parts[3])
+  const prevClose = num(parts[4])
+  const changePct = num(parts[32])
+  return {
+    code,
+    name: ALL_INDEX_NAMES[code] || code,
+    price,
+    changePct,
+    prevClose: prevClose || (price > 0 && changePct !== 0 ? price / (1 + changePct / 100) : price)
+  }
 }
 
 // ==================== 涨跌家数 & 成交额 ====================

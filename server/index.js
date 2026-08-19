@@ -12,7 +12,7 @@ import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { fetchMarketData, fetchKlineByRange, fetchIndices, fetchAllIndices } from './marketData.js'
+import { fetchMarketData, fetchKlineByRange, fetchIndices, fetchAllIndices, fetchIndexQuote } from './marketData.js'
 import {
   callHunyuan,
   buildMarketBriefPrompt,
@@ -148,18 +148,21 @@ const mockBreadth = {
   volumeChange: { pct: 5.36, diffYi: 1356, label: '放量', pending: false }
 }
 
-/** 生成 mock kline 数据（30 天趋势） */
+/** 生成 mock kline 数据（30 天趋势，日期以当天为基准） */
 function genMockKline(price, changePct) {
   const points = []
   const endPrice = price
   const startPrice = price / (1 + changePct / 100)
+  const today = new Date()
   for (let i = 0; i < 30; i++) {
     const progress = i / 29
     const basePrice = startPrice + (endPrice - startPrice) * progress
     const noise = (Math.random() - 0.5) * basePrice * 0.02
     const close = basePrice + noise
+    const d = new Date(today)
+    d.setDate(d.getDate() - (29 - i))
     points.push({
-      date: `2026-07-${String(i + 1).padStart(2, '0')}`,
+      date: d.toISOString().slice(0, 10),
       close: Number(close.toFixed(2))
     })
   }
@@ -623,12 +626,17 @@ async function handleIndexDetail(req) {
   const code = body.code || body.infoCode || 'sh000001'
   const window = body.window || '3m'
 
-  // 获取实时行情
-  let indices = null
+  // 获取实时行情：单指数精确查询（国内/海外均支持），失败再降级批量接口
+  let idx = null
   try {
-    indices = await fetchIndices()
+    idx = await fetchIndexQuote(code)
   } catch {}
-  const idx = indices?.find(i => i.code === code) || indices?.[0]
+  if (!idx) {
+    try {
+      const indices = await fetchIndices()
+      idx = indices?.find(i => i.code === code) || null
+    } catch {}
+  }
 
   // 获取多周期K线
   let kline = null
@@ -697,12 +705,22 @@ async function handleIndexDetail(req) {
     'sz399006': '反映创业板市场整体走势的核心指数，由创业板中市值大、流动性好的100只股票组成，聚焦科技创新和成长型企业。',
     'sh000300': '由沪深两市中市值大、流动性好的300只股票组成，覆盖A股核心资产，是衡量大盘蓝筹股整体表现的基准指数。',
     'sh000905': '反映沪深市场中小市值公司股票整体表现的指数，由剔除沪深300成分股后的500只股票组成，是中盘股走势的代表。',
-    'sh000688': '反映科创板市场整体走势的综合指数，聚焦"硬科技"领域企业，是观察中国科技创新企业发展状况的重要指标。'
+    'sh000688': '反映科创板市场整体走势的综合指数，聚焦"硬科技"领域企业，是观察中国科技创新企业发展状况的重要指标。',
+    'sh000852': '由沪深两市中剔除沪深300和中证500成分股后的1000只小盘股组成，反映A股小市值公司的整体表现。',
+    'bj899050': '反映北京证券交易所上市公司整体表现的核心指数，聚焦专精特新中小企业，是观察北交所市场走势的代表性指标。',
+    'hkHSI': '香港股市最具代表性的旗舰指数，由港交所市值最大、流动性最好的蓝筹股组成，是观察港股整体走势和市场情绪的核心指标。',
+    'hkHSTECH': '追踪在香港上市的30家最大科技公司表现的指数，覆盖互联网、电商、智能硬件等新经济龙头，是港股科技板块的代表性指标。',
+    'usDJI': '美国历史最悠久的股票指数，由30家美国工业龙头蓝筹股组成，价格加权计算，是观察美国经济和大企业表现的传统风向标。',
+    'usIXIC': '涵盖纳斯达克交易所上市的全部股票，科技股权重高，是全球科技股和创新企业走势的核心指标。',
+    'usINX': '由美国500家大型上市公司组成的指数，行业覆盖均衡，被广泛视为衡量美国大盘股整体表现的最佳基准。'
   }
 
   const nameMap = {
     'sh000001': '上证指数', 'sz399001': '深证成指', 'sz399006': '创业板指',
-    'sh000300': '沪深300', 'sh000905': '中证500', 'sh000688': '科创50'
+    'sh000300': '沪深300', 'sh000905': '中证500', 'sh000688': '科创50',
+    'sh000852': '中证1000', 'bj899050': '北证50',
+    'hkHSI': '恒生指数', 'hkHSTECH': '恒生科技',
+    'usDJI': '道琼斯', 'usIXIC': '纳斯达克', 'usINX': '标普500'
   }
 
   return {
