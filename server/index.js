@@ -403,26 +403,61 @@ async function getCachedMarketData() {
 
 // ==================== AI 结果缓存 ====================
 
-const _aiCache = new Map() // key: type + ctxHash → { data, time }
-const AI_CACHE_TTL = 300000 // 5分钟缓存
+const _aiCache = new Map() // key → { data, time }
+const _aiRefreshing = new Set() // 后台刷新中的 key，防止重复生成
+const AI_CACHE_TTL = 300000 // 新鲜期5分钟
+const AI_STALE_LIMIT = 900000 // 过期数据最多再服务15分钟（期间后台静默刷新）
 
-/** 带缓存的 AI 生成（5分钟内多人请求返回同一份结果） */
+// 盘面类 AI 内容：按时间桶缓存（内容无需跟随秒级行情变化，
+// 否则 key 随行情30秒一变导致缓存永不命中，每30秒就要重新调一次 DeepSeek）
+const AI_BUCKETED_TYPES = new Set(['marketBrief', 'emotion', 'dailyScripts', 'macroBrief'])
+
+/**
+ * 带缓存的 AI 生成
+ * - 盘面类：5分钟内多人请求返回同一份结果；过期后先返旧数据、后台静默刷新（用户无感）
+ * - 话术类：按用户输入参数精确缓存
+ */
 async function getCachedAI(type, ctx = {}) {
-  // 生成缓存 key：type + 关键上下文的哈希
-  const ctxKey = JSON.stringify(ctx || {})
+  const isBucketed = AI_BUCKETED_TYPES.has(type)
+  // 盘面类忽略 ctx（行情数据），话术类用完整参数做 key
+  const ctxKey = isBucketed ? '' : JSON.stringify(ctx || {})
   const cacheKey = `${type}:${ctxKey}`
   const cached = _aiCache.get(cacheKey)
+  const age = cached ? Date.now() - cached.time : Infinity
 
-  if (cached && (Date.now() - cached.time) < AI_CACHE_TTL) {
-    console.log(`[AI缓存] 命中: ${type}（距上次生成 ${Math.round((Date.now() - cached.time) / 1000)}秒前）`)
+  // 新鲜缓存直接返回
+  if (cached && age < AI_CACHE_TTL) {
+    console.log(`[AI缓存] 命中: ${type}（${Math.round(age / 1000)}秒前生成）`)
     return cached.data
   }
 
-  // 缓存未命中，调用 AI 生成
+  // 盘面类有过期缓存：立即返回旧数据（15分钟内），后台静默刷新新数据
+  if (cached && isBucketed && age < AI_STALE_LIMIT) {
+    console.log(`[AI缓存] 返回过期数据: ${type}（${Math.round(age / 1000)}秒前），后台刷新中...`)
+    refreshAIBackground(type, ctx, cacheKey)
+    return cached.data
+  }
+
+  // 无缓存（或过期太久）：同步生成
   console.log(`[AI缓存] 未命中: ${type}，调用 DeepSeek 生成...`)
   const data = await generateAI(type, ctx)
   _aiCache.set(cacheKey, { data, time: Date.now() })
   return data
+}
+
+/** 后台静默刷新 AI 缓存 */
+function refreshAIBackground(type, ctx, cacheKey) {
+  if (_aiRefreshing.has(cacheKey)) return
+  _aiRefreshing.add(cacheKey)
+  generateAI(type, ctx)
+    .then(data => {
+      _aiCache.set(cacheKey, { data, time: Date.now() })
+      console.log(`[AI缓存] 后台刷新完成: ${type}`)
+    })
+    .catch(e => {
+      console.warn(`[AI缓存] 后台刷新失败: ${type}`, e.message || e)
+    })
+    .finally(() => _aiRefreshing.delete(cacheKey))
 }
 
 /** 清除指定类型的 AI 缓存（可选：行情刷新时清除） */

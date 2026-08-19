@@ -286,11 +286,18 @@ export async function fetchAllKlines(indices) {
  * @param {string} range - 时间范围：1w/1m/3m/6m/1y
  * @returns {Promise<Array>} K线数据 [{date, open, close, high, low, volume}]
  */
-// 美股指数 东方财富 secid 映射（腾讯K线对美股指数只返回1行，东财才有多日历史）
+// 美股指数 东方财富 secid 映射
 const EM_SECID_MAP = {
   'usDJI': '100.DJIA',
   'usIXIC': '100.NDX',
   'usINX': '100.SPX'
+}
+
+// 美股指数 Yahoo Finance 符号映射（东财 push2his 对海外服务器 IP 有地域限制，雅虎在海外可直连）
+const YAHOO_SYMBOL_MAP = {
+  'usDJI': '%5EDJI',   // ^DJI 道琼斯
+  'usIXIC': '%5EIXIC', // ^IXIC 纳斯达克
+  'usINX': '%5EGSPC'   // ^GSPC 标普500
 }
 
 // 腾讯K线支持的指数（港股 + 中证1000；北证50 腾讯只有1行历史，走新浪）
@@ -306,9 +313,14 @@ export async function fetchKlineByRange(code, range = '3m') {
   }
   const datalen = rangeMap[range] || 90
 
-  // 美股指数走东方财富K线接口
+  // 美股指数：雅虎优先（海外服务器可直连），失败降级东财（国内环境可用）
   if (EM_SECID_MAP[code]) {
-    return fetchKlineEastMoney(code, datalen)
+    let kline = null
+    try { kline = await fetchKlineYahoo(code, datalen) } catch {}
+    if (!kline || kline.length < 5) {
+      try { kline = await fetchKlineEastMoney(code, datalen) } catch {}
+    }
+    return kline
   }
   // 港股指数/中证1000走腾讯K线接口
   if (TX_KLINE_CODES.includes(code)) {
@@ -332,9 +344,47 @@ export async function fetchKlineByRange(code, range = '3m') {
 }
 
 /**
+ * Yahoo Finance K线接口（美股指数）
+ * https://query1.finance.yahoo.com/v8/finance/chart/%5EDJI?range=3mo&interval=1d
+ * 返回 chart.result[0].timestamp[] + indicators.quote[0].{open,high,low,close,volume}[]
+ */
+export async function fetchKlineYahoo(code, days = 90) {
+  const symbol = YAHOO_SYMBOL_MAP[code]
+  if (!symbol) return null
+  // 交易日数 → 雅虎日历 range（1mo≈21交易日, 3mo≈64, 6mo≈126, 1y≈252, 2y≈504）
+  const range = days <= 10 ? '1mo' : days <= 35 ? '3mo' : days <= 95 ? '6mo' : days <= 185 ? '1y' : '2y'
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=${range}&interval=1d`
+  const json = await httpGetJSON(url, { 'Referer': 'https://finance.yahoo.com/' })
+
+  const result = json && json.chart && json.chart.result && json.chart.result[0]
+  if (!result || !Array.isArray(result.timestamp)) return null
+
+  // 用交易所时区偏移还原当地交易日（timestamp 为 UTC 秒）
+  const meta = result.meta || {}
+  const offset = meta.gmtoffset || 0
+  const q = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {}
+  const rows = []
+  for (let i = 0; i < result.timestamp.length; i++) {
+    const close = q.close ? q.close[i] : null
+    if (close == null) continue // 跳过停市/缺数据的行
+    const d = new Date((result.timestamp[i] + offset) * 1000)
+    rows.push({
+      date: d.toISOString().slice(0, 10),
+      open: num(q.open ? q.open[i] : close),
+      close: num(close),
+      high: num(q.high ? q.high[i] : close),
+      low: num(q.low ? q.low[i] : close),
+      volume: num(q.volume ? q.volume[i] : 0)
+    })
+  }
+  return rows.slice(-days)
+}
+
+/**
  * 东方财富K线接口（美股指数）
  * https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=100.DJIA&...
  * 返回 data.klines: ["date,open,close,high,low,volume,amount", ...]
+ * 注：push2his 对海外服务器 IP 有地域限制，作为国内环境的降级源
  */
 export async function fetchKlineEastMoney(code, days = 90) {
   const secid = EM_SECID_MAP[code]

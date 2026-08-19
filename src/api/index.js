@@ -82,7 +82,7 @@ function request(opts) {
 
 /** 获取市场简报（含 AI 分析） */
 export function marketBrief() {
-  return request({ url: '/marketBrief', timeout: 20000 })
+  return request({ url: '/marketBrief', timeout: 45000 })
 }
 
 /** 获取市场简报（不含 AI） */
